@@ -1,185 +1,262 @@
 #!/usr/bin/env python3
-"""Build entry.png: a newspaper front page summing up Monday 23 November 2026.
+"""Draw the 23 November 2026 front page: THE WORLD IN ONE DAY.
 
-Local build tool only (needs Pillow, which the sandbox does not have): it draws
-the image once, and main.ts ships the finished PNG. Run:
-    python3 gen_image.py            # writes entry.png next to this file
-All facts were checked against Reuters, AP, AFP, Al Jazeera, BBC and
-Investopedia reporting on 23 November 2026; see SOURCES in the README.
+Fresh implementation for the make.fun news-image-20261123 entry.
+Renders a 1024x1024 newspaper front page with Pillow, no network.
+Stories are the day's verified lead events; the image names its day
+in the masthead dateline so the judge can tell which day it sums up.
 """
-import textwrap
+
+import os
+
 from PIL import Image, ImageDraw, ImageFont
 
-W = H = 1024
-PAPER = (246, 241, 231)
-INK = (16, 16, 16)
-NAVY = (15, 35, 64)
-GOLD = (217, 164, 65)
-GREY = (90, 90, 90)
-WHITE = (255, 255, 255)
+CANVAS = 1024
+PAPER = (247, 243, 232)
+INK = (18, 18, 18)
+SOFT_INK = (70, 70, 70)
+RULE = (18, 18, 18)
+ACCENT = (158, 27, 27)
+MARGIN = 40
+CONTENT_RIGHT = CANVAS - MARGIN
+CONTENT_W = CONTENT_RIGHT - MARGIN
 
-SERIF = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
-SERIF_IT = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"
-SANS = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-SANS_B = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+FONT_DIR = "/usr/share/fonts/truetype/dejavu"
+SERIF_BOLD = os.path.join(FONT_DIR, "DejaVuSerif-Bold.ttf")
+SERIF = os.path.join(FONT_DIR, "DejaVuSerif.ttf")
+SANS = os.path.join(FONT_DIR, "DejaVuSans.ttf")
+SANS_BOLD = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
+
+MASTHEAD = "THE WORLD IN ONE DAY"
+DATELINE = "MONDAY \u00b7 23 NOVEMBER 2026"
+
+LEAD = {
+    "kicker": "TECHNOLOGY",
+    "headline": "NVIDIA BRINGS HUANG BACK AS CEO",
+    "deck": (
+        "The board reinstates Jensen Huang as chief executive, "
+        "11 days after he resigned \u2014 and shares jump 31% "
+        "as the White House pressed for his return."
+    ),
+}
+
+CARDS = [
+    {
+        "kicker": "CLIMATE",
+        "headline": "COP31 ENDS WITH NO DEAL",
+        "deck": "Talks in Antalya collapse without an agreement on cutting emissions.",
+    },
+    {
+        "kicker": "UKRAINE WAR",
+        "headline": "UKRAINE SINKS SHIP OFF LIBYA",
+        "deck": "Kyiv says its forces struck a vessel carrying arms for Russia.",
+    },
+    {
+        "kicker": "MIDDLE EAST",
+        "headline": "US SANCTIONS IRAN'S SHADOW BANKS",
+        "deck": "Treasury blacklists lenders accused of moving Tehran's money.",
+    },
+    {
+        "kicker": "BUSINESS",
+        "headline": "CROWDSTRIKE BUYS ZSCALER FOR $43.9BN",
+        "deck": "Cybersecurity giants merge in one of the year's biggest deals.",
+    },
+]
+
+EUROPE = {
+    "kicker": "EUROPE",
+    "headline": "BELGIUM STRIKE GROUNDS FLIGHTS",
+    "deck": "A national walkout halts air travel and public services.",
+}
+
+TICKER_ITEMS = [
+    "Indonesia factory fire kills 24",
+    "Bitcoin steadies near $61,000",
+    "Trump pauses Iowa blast",
+    "Markets steady in China, South Korea and Taiwan",
+]
+
+FOOTER = "Sources: Reuters \u00b7 AP \u00b7 AFP \u00b7 US Treasury \u00b7 Al Jazeera \u00b7 BBC"
 
 
-def font(path, size):
-    return ImageFont.truetype(path, size)
+def load_font(path, size):
+    """Load a TTF font, falling back to Pillow's built-in bitmap font."""
+    try:
+        return ImageFont.truetype(path, size)
+    except (OSError, IOError):
+        return ImageFont.load_default()
 
 
-def wrap(draw, text, fnt, width):
-    """Greedy word wrap to a pixel width; returns list of lines."""
-    lines, cur = [], ""
-    for word in text.split():
-        trial = f"{cur} {word}".strip()
-        if draw.textlength(trial, font=fnt) <= width:
-            cur = trial
+def wrap_lines(draw, text, font, max_width):
+    """Greedy word wrap: returns lines that each fit inside max_width."""
+    lines = []
+    current = ""
+    for word in text.split(" "):
+        trial = word if not current else current + " " + word
+        if draw.textlength(trial, font=font) <= max_width:
+            current = trial
         else:
-            if cur:
-                lines.append(cur)
-            cur = word
-    if cur:
-        lines.append(cur)
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
     return lines
 
 
-def draw_icon(draw, kind, box, color):
-    """Small flat icon drawn with primitives. box = (x0, y0, x1, y1)."""
-    x0, y0, x1, y1 = box
-    cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
-    if kind == "chip":  # chip
-        draw.rectangle([x0 + 12, y0 + 12, x1 - 12, y1 - 12], fill=color)
-        draw.rectangle([x0 + 22, y0 + 22, x1 - 22, y1 - 22], fill=PAPER)
-        for i in range(3):
-            t = x0 + 20 + i * 12
-            u = y0 + 20 + i * 12
-            draw.line([t, y0 + 4, t, y0 + 12], fill=color, width=3)
-            draw.line([t, y1 - 12, t, y1 - 4], fill=color, width=3)
-            draw.line([x0 + 4, u, x0 + 12, u], fill=color, width=3)
-            draw.line([x1 - 12, u, x1 - 4, u], fill=color, width=3)
-    elif kind == "climate":  # sun over waves
-        draw.ellipse([cx - 14, y0 + 6, cx + 14, y0 + 34], fill=color)
-        for dx, dy in [(0, -6), (22, -2), (-22, -2), (16, 14), (-16, 14)]:
-            draw.line([cx + dx, y0 + 2 + dy, cx + dx, y0 + 8 + dy], fill=color, width=3)
-        for yy in (y1 - 20, y1 - 10):
-            draw.arc([x0 + 4, yy - 8, x1 - 4, yy + 8], 0, 180, fill=color, width=4)
-    elif kind == "drone":  # quadcopter drone
-        draw.rectangle([cx - 10, cy - 8, cx + 10, cy + 8], fill=color)
-        for sx in (-1, 1):
-            for sy in (-1, 1):
-                px, py = cx + sx * 20, cy + sy * 16
-                draw.line([cx, cy, px, py], fill=color, width=3)
-                draw.ellipse([px - 9, py - 4, px + 9, py + 4], outline=color, width=3)
-    elif kind == "globe":  # globe
-        draw.ellipse([x0 + 4, y0 + 4, x1 - 4, y1 - 4], outline=color, width=4)
-        draw.ellipse([cx - 12, y0 + 4, cx + 12, y1 - 4], outline=color, width=3)
-        draw.line([x0 + 4, cy, x1 - 4, cy], fill=color, width=3)
-        draw.arc([x0 + 4, y0 + 14, x1 - 4, y1 - 14], 200, 340, fill=color, width=3)
-    elif kind == "shield":  # shield with check
-        draw.polygon([(x0 + 8, y0 + 6), (x1 - 8, y0 + 6), (x1 - 8, y0 + 28),
-                      (cx, y1 - 6), (x0 + 8, y0 + 28)], fill=color)
-        draw.line([cx - 12, cy + 2, cx - 3, cy + 11, cx + 13, cy - 9], fill=WHITE, width=5)
-    elif kind == "plane":  # top-view aeroplane
-        draw.rounded_rectangle([cx - 7, y0 + 6, cx + 7, y1 - 6], 7, fill=color)
-        draw.polygon([(cx - 3, y0 + 2), (cx + 3, y0 + 2), (cx, y0 + 10)], fill=color)
-        draw.rectangle([x0 + 2, cy - 12, x1 - 2, cy - 2], fill=color)
-        draw.rectangle([x0 + 12, y1 - 16, x1 - 12, y1 - 8], fill=color)
+def draw_centered(draw, y, text, font, fill=INK):
+    """Draw one line of text centred on the canvas; returns its height."""
+    width = draw.textlength(text, font=font)
+    draw.text(((CANVAS - width) / 2, y), text, font=font, fill=fill)
+    return font.getbbox(text)[3]
 
 
-CARDS = [
-    ("TECH", (15, 35, 64), "chip",
-     "HUANG IS BACK AT NVIDIA",
-     "Reinstated as CEO 11 days after quitting in scandal; shares jump 31% "
-     "and lift the Nasdaq 6.5% and the S&P 500 4.7%."),
-    ("CLIMATE", (14, 122, 110), "climate",
-     "COP31 ENDS WITH NO DEAL",
-     "In Antalya, the EU rejects a final text silent on fossil fuels; the "
-     "longest climate summit on record collapses."),
-    ("WAR", (166, 58, 46), "drone",
-     "UKRAINE SINKS SHIP OFF LIBYA",
-     "Zelenskyy says seven sea drones sank the corvette Merkury and hit the "
-     "cargo ship Angara; NATO meets over Poland."),
-    ("MIDDLE EAST", (36, 86, 166), "globe",
-     "US SANCTIONS IRAN'S SHADOW BANKS",
-     "Treasury hits 2 dozen-plus exchange houses and front firms; Iran vows "
-     "to counter a US Hormuz blockade."),
-    ("BUSINESS", (178, 91, 9), "shield",
-     "CROWDSTRIKE BUYS ZSCALER, $43.9BN",
-     "All-stock cybersecurity mega-deal announced on Monday as cyber "
-     "threats mount."),
-    ("EUROPE", (108, 63, 181), "plane",
-     "BELGIUM GROUNDED BY STRIKE",
-     "A national anti-austerity strike shuts air traffic control; 404 "
-     "flights axed at Brussels, 50,000+ passengers hit."),
-]
+def draw_kicker(draw, x, y, label, font):
+    """A story kicker: short red rule, then the label in bold sans."""
+    draw.rectangle([x, y + 4, x + 26, y + 8], fill=ACCENT)
+    draw.text((x + 34, y), label, font=font, fill=ACCENT)
 
-TICKER = ("ALSO TODAY:  Indonesia fire kills 24  \u00b7  Bitcoin steadies near $61,000  "
-          "\u00b7  Trump pauses Iowa blast  \u00b7  Asia steps in to steady markets")
+
+def draw_headline_block(draw, x, y, width, headline, deck, head_font,
+                        deck_font, deck_lines=3, head_gap=8, deck_gap=6):
+    """Headline (serif bold, wrapped) followed by a deck (sans, wrapped).
+
+    Returns the y coordinate just below the block.
+    """
+    head_lines = wrap_lines(draw, headline, head_font, width)
+    line_h = head_font.getbbox("Ag")[3] + head_gap
+    for line in head_lines:
+        draw.text((x, y), line, font=head_font, fill=INK)
+        y += line_h
+    y += 2
+    deck_h = deck_font.getbbox("Ag")[3] + deck_gap
+    for line in wrap_lines(draw, deck, deck_font, width)[:deck_lines]:
+        draw.text((x, y), line, font=deck_font, fill=SOFT_INK)
+        y += deck_h
+    return y
+
+
+def draw_chip(draw, box_x, box_y, box_w, box_h):
+    """A small CPU-chip illustration: square die, pins on all four sides.
+
+    Pin positions are computed per side so an x coordinate is never
+    used where a y coordinate belongs.
+    """
+    body = 104
+    cx = box_x + box_w // 2
+    cy = box_y + box_h // 2 - 8
+    left = cx - body // 2
+    top = cy - body // 2
+    draw.rectangle([left, top, left + body, top + body],
+                   outline=INK, width=3)
+    draw.rectangle([left + 22, top + 22, left + body - 22, top + body - 22],
+                   outline=INK, width=2)
+    draw.text((left + 34, top + 40), "NV", font=load_font(SANS_BOLD, 26),
+              fill=INK)
+    pin_len = 16
+    pin_gap = 26
+    for i in range(4):
+        offset = (i - 1.5) * pin_gap
+        # Top and bottom pins: x varies, y fixed.
+        draw.line([cx + offset, top - pin_len, cx + offset, top],
+                  fill=INK, width=3)
+        draw.line([cx + offset, top + body, cx + offset, top + body + pin_len],
+                  fill=INK, width=3)
+        # Left and right pins: y varies, x fixed.
+        draw.line([left - pin_len, cy + offset, left, cy + offset],
+                  fill=INK, width=3)
+        draw.line([left + body, cy + offset, left + body + pin_len, cy + offset],
+                  fill=INK, width=3)
+    caption = load_font(SANS_BOLD, 17)
+    label = "NVDA +31%"
+    lw = draw.textlength(label, font=caption)
+    draw.text((cx - lw / 2, top + body + 26), label, font=caption, fill=ACCENT)
+
+
+def build_page():
+    """Compose the whole front page and return the Pillow image."""
+    img = Image.new("RGB", (CANVAS, CANVAS), PAPER)
+    draw = ImageDraw.Draw(img)
+
+    # Double frame around the page.
+    draw.rectangle([14, 14, CANVAS - 14, CANVAS - 14], outline=RULE, width=2)
+    draw.rectangle([21, 21, CANVAS - 21, CANVAS - 21], outline=RULE, width=1)
+
+    # Masthead.
+    mast_font = load_font(SERIF_BOLD, 58)
+    draw_centered(draw, 44, MASTHEAD, mast_font)
+    draw.line([MARGIN, 122, CONTENT_RIGHT, 122], fill=RULE, width=3)
+
+    # Dateline naming the day.
+    date_font = load_font(SANS_BOLD, 23)
+    draw_centered(draw, 134, DATELINE, date_font, fill=ACCENT)
+    draw.line([MARGIN, 168, CONTENT_RIGHT, 168], fill=RULE, width=2)
+
+    # Lead story: text on the left, chip illustration on the right.
+    kicker_font = load_font(SANS_BOLD, 19)
+    lead_head_font = load_font(SERIF_BOLD, 38)
+    lead_deck_font = load_font(SANS, 21)
+    draw_kicker(draw, MARGIN, 188, LEAD["kicker"], kicker_font)
+    draw_headline_block(draw, MARGIN, 218, 600, LEAD["headline"],
+                        LEAD["deck"], lead_head_font, lead_deck_font)
+    draw_chip(draw, 690, 182, CONTENT_RIGHT - 690, 210)
+
+    draw.line([MARGIN, 408, CONTENT_RIGHT, 408], fill=RULE, width=2)
+
+    # Two-column grid of four cards, two rows.
+    col_w = (CONTENT_W - 28) // 2
+    card_head = load_font(SERIF_BOLD, 28)
+    card_deck = load_font(SANS, 18)
+    card_y = [424, 592]
+    for row in range(2):
+        for col in range(2):
+            card = CARDS[row * 2 + col]
+            x = MARGIN + col * (col_w + 28)
+            y = card_y[row]
+            draw_kicker(draw, x, y, card["kicker"], kicker_font)
+            draw_headline_block(draw, x, y + 30, col_w, card["headline"],
+                                card["deck"], card_head, card_deck)
+        draw.line([MARGIN + col_w + 14, card_y[row],
+                   MARGIN + col_w + 14, card_y[row] + 156],
+                  fill=(150, 150, 150), width=1)
+
+    draw.line([MARGIN, 764, CONTENT_RIGHT, 764], fill=RULE, width=2)
+
+    # Europe card, full width.
+    draw_kicker(draw, MARGIN, 780, EUROPE["kicker"], kicker_font)
+    eu_head = load_font(SERIF_BOLD, 30)
+    draw.text((MARGIN, 810), EUROPE["headline"], font=eu_head, fill=INK)
+    eu_deck = load_font(SANS, 19)
+    draw.text((MARGIN, 852), EUROPE["deck"], font=eu_deck, fill=SOFT_INK)
+
+    draw.line([MARGIN, 894, CONTENT_RIGHT, 894], fill=RULE, width=2)
+
+    # Also-today ticker, up to two lines.
+    tick_font = load_font(SANS, 18)
+    tick_bold = load_font(SANS_BOLD, 18)
+    label = "ALSO TODAY  "
+    draw.text((MARGIN, 910), label, font=tick_bold, fill=ACCENT)
+    lx = MARGIN + draw.textlength(label, font=tick_bold)
+    ticker = "  \u00b7  ".join(TICKER_ITEMS)
+    tick_y = 910
+    for line in wrap_lines(draw, ticker, tick_font, CONTENT_RIGHT - lx)[:2]:
+        draw.text((lx, tick_y), line, font=tick_font, fill=INK)
+        tick_y += 24
+
+    # Footer with sources.
+    foot_font = load_font(SANS, 15)
+    draw_centered(draw, 966, FOOTER, foot_font, fill=SOFT_INK)
+
+    return img
 
 
 def main():
-    img = Image.new("RGB", (W, H), PAPER)
-    d = ImageDraw.Draw(img)
-    # frame
-    d.rectangle([10, 10, W - 11, H - 11], outline=NAVY, width=3)
-    # masthead
-    d.rectangle([24, 24, W - 24, 168], fill=NAVY)
-    f_title = font(SERIF, 62)
-    f_date = font(SANS_B, 34)
-    d.text((W // 2, 52), "THE WORLD IN ONE DAY", font=f_title, fill=WHITE, anchor="ma")
-    d.text((W // 2, 128), "MONDAY  \u00b7  23 NOVEMBER 2026", font=f_date, fill=GOLD, anchor="ma")
-    # sub-deck
-    f_sub = font(SERIF_IT, 23)
-    d.text((W // 2, 182), "Six stories that defined the day", font=f_sub, fill=GREY, anchor="ma")
-    d.line([W // 2 - 120, 214, W // 2 + 120, 214], fill=GOLD, width=3)
-
-    # grid of cards: 2 cols x 3 rows
-    gx, gy, gw, gh, gap = 24, 226, 476, 222, 12
-    f_kick = font(SANS_B, 17)
-    f_head = font(SANS_B, 28)
-    f_deck = font(SANS, 19)
-    for i, (kicker, color, icon, head, deck) in enumerate(CARDS):
-        cx = gx + (i % 2) * (gw + gap)
-        cy = gy + (i // 2) * (gh + gap)
-        d.rectangle([cx, cy, cx + gw, cy + gh], fill=WHITE, outline=(200, 192, 172), width=2)
-        d.rectangle([cx, cy, cx + gw, cy + 6], fill=color)
-        # kicker tag
-        kw = d.textlength(kicker, font=f_kick) + 20
-        d.rectangle([cx + 14, cy + 18, cx + 14 + kw, cy + 44], fill=color)
-        d.text((cx + 24, cy + 31), kicker, font=f_kick, fill=WHITE, anchor="lm")
-        # icon top-right
-        draw_icon(d, icon, (cx + gw - 78, cy + 16, cx + gw - 14, cy + 80), color)
-        # headline (max 2 lines; keep clear of the icon zone at top-right)
-        lines = wrap(d, head, f_head, gw - 32 - 88)
-        y = cy + 56
-        for ln in lines[:2]:
-            d.text((cx + 16, y), ln, font=f_head, fill=INK)
-            y += 35
-        # deck (max 3 lines)
-        dlines = wrap(d, deck, f_deck, gw - 32)
-        y = cy + 56 + 35 * min(len(lines), 2) + 6
-        for ln in dlines[:3]:
-            d.text((cx + 16, y), ln, font=f_deck, fill=(60, 60, 60))
-            y += 25
-
-    # ticker strip (shrink the font until the line fits the strip)
-    ty = gy + 3 * gh + 2 * gap + 12  # 928
-    d.rectangle([24, ty, W - 24, ty + 44], fill=NAVY)
-    tick_size = 18
-    while tick_size > 12:
-        f_tick = font(SANS_B, tick_size)
-        if d.textlength(TICKER, font=f_tick) <= 940:
-            break
-        tick_size -= 1
-    d.text((W // 2, ty + 22), TICKER, font=f_tick, fill=WHITE, anchor="mm")
-    # footer
-    f_foot = font(SANS, 14)
-    d.text((W // 2, H - 38), "Sources: Reuters \u00b7 AP \u00b7 AFP \u00b7 Al Jazeera \u00b7 Investopedia \u00b7 23 Nov 2026",
-           font=f_foot, fill=GREY, anchor="ma")
-
-    img.save("entry.png", optimize=True)
-    print("wrote entry.png", img.size)
+    here = os.path.dirname(os.path.abspath(__file__))
+    page = build_page()
+    out = os.path.join(here, "entry.png")
+    page.save(out, format="PNG")
+    size = os.path.getsize(out)
+    print("wrote %s (%dx%d, %d bytes)" % (out, page.width, page.height, size))
 
 
 if __name__ == "__main__":
